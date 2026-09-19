@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from mcp.server.auth.provider import RegistrationError
 from mcp.shared.auth import OAuthClientInformationFull
 
 from core.oauth_provider import SQLiteOAuthProvider
@@ -47,6 +48,37 @@ def test_register_and_get_public_client(tmp_path):
     assert loaded.token_endpoint_auth_method == "none"
     assert loaded.application_type == "native"
     assert loaded.scope == "mcp:read"
+
+def test_register_rejects_unsupported_scope(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-invalid-scope",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Invalid Scope Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read admin",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert (
+            exc_info.value.error_description
+            == "Only the 'mcp:read' scope is supported"
+        )
+
+    asyncio.run(run_test())
+
 
 def test_authorize_creates_pending_request(tmp_path):
     import asyncio
