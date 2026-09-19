@@ -49,6 +49,40 @@ def test_register_and_get_public_client(tmp_path):
     assert loaded.application_type == "native"
     assert loaded.scope == "mcp:read"
 
+def test_register_rejects_confidential_client_auth_method(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-confidential-auth",
+        client_secret="unexpected-secret",
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Confidential Client Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="client_secret_post",
+        application_type="native",
+    )
+
+    async def run_test():
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert (
+            exc_info.value.error_description
+            == (
+                "Only public clients with token_endpoint_auth_method "
+                "'none' are supported"
+            )
+        )
+
+    asyncio.run(run_test())
+
+
 def test_register_rejects_unsupported_scope(tmp_path):
     db_path = make_test_db(tmp_path)
     provider = SQLiteOAuthProvider(db_path=db_path)
