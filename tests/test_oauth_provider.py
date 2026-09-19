@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from mcp.server.auth.provider import AuthorizeError, RegistrationError
+from mcp.server.auth.provider import AuthorizeError, RegistrationError, TokenError
 from mcp.shared.auth import OAuthClientInformationFull
 
 from core.oauth_provider import SQLiteOAuthProvider
@@ -752,6 +752,405 @@ def test_access_token_and_refresh_rotation(tmp_path):
         assert second_access is not None
 
     asyncio.run(run_test())
+
+def test_refresh_token_rejects_scope_escalation(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-refresh-scope",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Refresh Scope Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="refresh-scope-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(client, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        redirect_url = await provider.complete_authorization(
+            request_id,
+            approved=True,
+        )
+
+        code = parse_qs(
+            urlparse(redirect_url).query
+        )["code"][0]
+
+        authorization_code = await provider.load_authorization_code(
+            client,
+            code,
+        )
+        assert authorization_code is not None
+
+        token = await provider.exchange_authorization_code(
+            client,
+            authorization_code,
+        )
+
+        refresh_token = await provider.load_refresh_token(
+            client,
+            token.refresh_token,
+        )
+        assert refresh_token is not None
+
+        with pytest.raises(TokenError) as exc_info:
+            await provider.exchange_refresh_token(
+                client,
+                refresh_token,
+                ["mcp:read", "admin"],
+            )
+
+        assert exc_info.value.error == "invalid_scope"
+        assert (
+            exc_info.value.error_description
+            == "Requested scope exceeds the originally granted scope"
+        )
+
+    asyncio.run(run_test())
+
+
+def test_load_refresh_token_rejects_wrong_client(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    owner = OAuthClientInformationFull(
+        client_id="test-refresh-owner",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Refresh Owner Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    other = OAuthClientInformationFull(
+        client_id="test-refresh-other",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Other Client Test",
+        redirect_uris=["http://127.0.0.1:8766/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(owner)
+        await provider.register_client(other)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="wrong-client-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(owner, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        redirect_url = await provider.complete_authorization(
+            request_id,
+            approved=True,
+        )
+
+        code = parse_qs(
+            urlparse(redirect_url).query
+        )["code"][0]
+
+        authorization_code = await provider.load_authorization_code(
+            owner,
+            code,
+        )
+        assert authorization_code is not None
+
+        token = await provider.exchange_authorization_code(
+            owner,
+            authorization_code,
+        )
+
+        assert (
+            await provider.load_refresh_token(
+                other,
+                token.refresh_token,
+            )
+            is None
+        )
+
+    asyncio.run(run_test())
+
+
+def test_load_refresh_token_rejects_expired_token(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-expired-refresh",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Expired Refresh Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        import sqlite3
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="expired-refresh-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(client, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        redirect_url = await provider.complete_authorization(
+            request_id,
+            approved=True,
+        )
+
+        code = parse_qs(
+            urlparse(redirect_url).query
+        )["code"][0]
+
+        authorization_code = await provider.load_authorization_code(
+            client,
+            code,
+        )
+        assert authorization_code is not None
+
+        token = await provider.exchange_authorization_code(
+            client,
+            authorization_code,
+        )
+
+        import hashlib
+
+        refresh_hash = hashlib.sha256(
+            token.refresh_token.encode("utf-8")
+        ).hexdigest()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                UPDATE refresh_tokens
+                SET expires_at = 0
+                WHERE token_hash = ?
+                """,
+                (refresh_hash,),
+            )
+            conn.commit()
+
+        assert (
+            await provider.load_refresh_token(
+                client,
+                token.refresh_token,
+            )
+            is None
+        )
+
+    asyncio.run(run_test())
+
+
+def test_load_access_token_rejects_tampered_token(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-tampered-access",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Tampered Access Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="tampered-access-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(client, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        redirect_url = await provider.complete_authorization(
+            request_id,
+            approved=True,
+        )
+
+        code = parse_qs(
+            urlparse(redirect_url).query
+        )["code"][0]
+
+        authorization_code = await provider.load_authorization_code(
+            client,
+            code,
+        )
+        assert authorization_code is not None
+
+        token = await provider.exchange_authorization_code(
+            client,
+            authorization_code,
+        )
+
+        tampered = token.access_token[:-1] + (
+            "A" if token.access_token[-1] != "A" else "B"
+        )
+
+        assert await provider.load_access_token(tampered) is None
+
+    asyncio.run(run_test())
+
+
+def test_load_access_token_rejects_expired_database_record(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-expired-access-db",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Expired Access DB Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        import sqlite3
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="expired-access-db-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(client, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        redirect_url = await provider.complete_authorization(
+            request_id,
+            approved=True,
+        )
+
+        code = parse_qs(
+            urlparse(redirect_url).query
+        )["code"][0]
+
+        authorization_code = await provider.load_authorization_code(
+            client,
+            code,
+        )
+        assert authorization_code is not None
+
+        token = await provider.exchange_authorization_code(
+            client,
+            authorization_code,
+        )
+
+        import hashlib
+
+        token_hash = hashlib.sha256(
+            token.access_token.encode("utf-8")
+        ).hexdigest()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                UPDATE access_tokens
+                SET expires_at = 0
+                WHERE token_hash = ?
+                """,
+                (token_hash,),
+            )
+            conn.commit()
+
+        assert await provider.load_access_token(token.access_token) is None
+
+    asyncio.run(run_test())
+
 
 def test_token_revocation_invalidates_token_pair(tmp_path):
     import asyncio
