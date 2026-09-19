@@ -176,6 +176,135 @@ def test_register_rejects_unsupported_scope(tmp_path):
     asyncio.run(run_test())
 
 
+def test_register_rejects_missing_refresh_token_grant(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-missing-refresh",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Missing Refresh Grant Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert (
+            exc_info.value.error_description
+            == "grant_types must include 'refresh_token'"
+        )
+
+    asyncio.run(run_test())
+
+
+def test_register_rejects_missing_code_response_type(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-missing-code-response",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Missing Code Response Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["token"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert (
+            exc_info.value.error_description
+            == "response_types must include 'code'"
+        )
+
+    asyncio.run(run_test())
+
+
+def test_register_rejects_missing_redirect_uri(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-missing-redirect",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Missing Redirect URI Test",
+        redirect_uris=[],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert (
+            exc_info.value.error_description
+            == "redirect_uris must contain at least one URI"
+        )
+
+    asyncio.run(run_test())
+
+
+def test_register_rejects_duplicate_client_id(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    def make_client():
+        return OAuthClientInformationFull(
+            client_id="test-duplicate-client",
+            client_secret=None,
+            client_id_issued_at=0,
+            client_secret_expires_at=None,
+            client_name="Duplicate Client Test",
+            redirect_uris=["http://127.0.0.1:8765/callback"],
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            scope="mcp:read",
+            token_endpoint_auth_method="none",
+            application_type="native",
+        )
+
+    async def run_test():
+        client = make_client()
+
+        await provider.register_client(client)
+
+        with pytest.raises(RegistrationError) as exc_info:
+            await provider.register_client(client)
+
+        assert exc_info.value.error == "invalid_client_metadata"
+        assert (
+            exc_info.value.error_description
+            == "client_id is already registered"
+        )
+
+    asyncio.run(run_test())
+
+
 def test_authorize_creates_pending_request(tmp_path):
     import asyncio
     import sqlite3
