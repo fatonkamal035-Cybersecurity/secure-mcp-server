@@ -10,7 +10,8 @@ from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 
@@ -42,7 +43,7 @@ def detect_lan_ipv4() -> str:
 def generate_certificate(lan_ip: str) -> None:
     TLS_DIR.mkdir(parents=True, exist_ok=True)
 
-    private_key = ed25519.Ed25519PrivateKey.generate()
+    private_key = ec.generate_private_key(ec.SECP256R1())
 
     subject = issuer = x509.Name(
         [
@@ -73,7 +74,7 @@ def generate_certificate(lan_ip: str) -> None:
             + timedelta(days=365)
         )
         .add_extension(san, critical=False)
-        .sign(private_key, None)
+        .sign(private_key, hashes.SHA256())
     )
 
     KEY_PATH.write_bytes(
@@ -111,12 +112,12 @@ def promote_certificate(lan_ip: str) -> None:
     )
 
     cert_public = certificate.public_key().public_bytes(
-        serialization.Encoding.Raw,
-        serialization.PublicFormat.Raw,
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     key_public = private_key.public_key().public_bytes(
-        serialization.Encoding.Raw,
-        serialization.PublicFormat.Raw,
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
     if cert_public != key_public:
