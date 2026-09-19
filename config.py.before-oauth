@@ -1,0 +1,29 @@
+import os
+from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parent
+
+MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
+MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+
+MCP_PUBLIC_HOST = os.getenv("MCP_PUBLIC_HOST", "192.168.1.7")
+
+MCP_ISSUER = os.getenv(
+    "MCP_ISSUER",
+    f"http://{MCP_PUBLIC_HOST}:{MCP_PORT}",
+)
+
+MCP_RESOURCE = os.getenv(
+    "MCP_RESOURCE",
+    f"{MCP_ISSUER}/mcp",
+)
+
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "EdDSA")
+
+PUBLIC_KEY_PATH = Path(
+    os.getenv(
+        "MCP_PUBLIC_KEY_PATH",
+        str(BASE_DIR / "secrets" / "jwt-ed25519-public.pem"),
+    )
+)

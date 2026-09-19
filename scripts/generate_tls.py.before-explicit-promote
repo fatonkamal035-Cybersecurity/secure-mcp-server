@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+import ipaddress
+import os
+import shutil
+import socket
+from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+TLS_DIR = BASE_DIR / "secrets" / "tls"
+KEY_PATH = TLS_DIR / "mcp-server.key.tmp"
+CERT_PATH = TLS_DIR / "mcp-server.crt.tmp"
+ACTIVE_KEY_PATH = TLS_DIR / "mcp-server.key"
+ACTIVE_CERT_PATH = TLS_DIR / "mcp-server.crt"
+
+
+def detect_lan_ipv4() -> str:
+    """Detect the IPv4 address selected for outbound LAN traffic."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 80))
+        address = sock.getsockname()[0]
+    finally:
+        sock.close()
+
+    ip = ipaddress.ip_address(address)
+
+    if ip.version != 4 or ip.is_loopback:
+        raise RuntimeError("IPv4 LAN address tidak berhasil dideteksi.")
+
+    return address
+
+
+def generate_certificate(lan_ip: str) -> None:
+    TLS_DIR.mkdir(parents=True, exist_ok=True)
+
+    private_key = ed25519.Ed25519PrivateKey.generate()
+
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, lan_ip),
+        ]
+    )
+
+    san = x509.SubjectAlternativeName(
+        [
+            x509.IPAddress(ipaddress.ip_address(lan_ip)),
+            x509.DNSName("localhost"),
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            x509.DNSName("mcp-server.local"),
+        ]
+    )
+
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(
+            datetime.now(timezone.utc)
+        )
+        .not_valid_after(
+            datetime.now(timezone.utc)
+            + timedelta(days=365)
+        )
+        .add_extension(san, critical=False)
+        .sign(private_key, None)
+    )
+
+    KEY_PATH.write_bytes(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+
+    CERT_PATH.write_bytes(
+        certificate.public_bytes(serialization.Encoding.PEM)
+    )
+
+    KEY_PATH.chmod(0o600)
+    CERT_PATH.chmod(0o644)
+
+    print(f"LAN IPv4 : {lan_ip}")
+    print(f"Certificate: {CERT_PATH}")
+    print(f"Private key: {KEY_PATH}")
+
+
+def promote_certificate(lan_ip: str) -> None:
+    """Validate staging files and safely promote them to active TLS files."""
+    if not KEY_PATH.is_file() or not CERT_PATH.is_file():
+        raise FileNotFoundError("File TLS staging tidak lengkap.")
+
+    private_key = serialization.load_pem_private_key(
+        KEY_PATH.read_bytes(),
+        password=None,
+    )
+
+    certificate = x509.load_pem_x509_certificate(
+        CERT_PATH.read_bytes()
+    )
+
+    cert_public = certificate.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    key_public = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+
+    if cert_public != key_public:
+        raise RuntimeError("Private key dan certificate staging tidak cocok.")
+
+    san = certificate.extensions.get_extension_for_class(
+        x509.SubjectAlternativeName
+    ).value
+
+    required_ips = {
+        ipaddress.ip_address(lan_ip),
+        ipaddress.ip_address("127.0.0.1"),
+    }
+    required_dns = {"localhost", "mcp-server.local"}
+
+    actual_ips = set(san.get_values_for_type(x509.IPAddress))
+    actual_dns = set(san.get_values_for_type(x509.DNSName))
+
+    if not required_ips.issubset(actual_ips):
+        raise RuntimeError("SAN IP staging tidak lengkap.")
+
+    if not required_dns.issubset(actual_dns):
+        raise RuntimeError("SAN DNS staging tidak lengkap.")
+
+    key_backup = TLS_DIR / "mcp-server.key.backup"
+    cert_backup = TLS_DIR / "mcp-server.crt.backup"
+
+    had_key = ACTIVE_KEY_PATH.exists()
+    had_cert = ACTIVE_CERT_PATH.exists()
+
+    if had_key:
+        shutil.copy2(ACTIVE_KEY_PATH, key_backup)
+
+    if had_cert:
+        shutil.copy2(ACTIVE_CERT_PATH, cert_backup)
+
+    try:
+        os.replace(KEY_PATH, ACTIVE_KEY_PATH)
+        os.replace(CERT_PATH, ACTIVE_CERT_PATH)
+
+        ACTIVE_KEY_PATH.chmod(0o600)
+        ACTIVE_CERT_PATH.chmod(0o644)
+
+    except Exception:
+        if had_key and key_backup.exists():
+            shutil.copy2(key_backup, ACTIVE_KEY_PATH)
+        elif not had_key and ACTIVE_KEY_PATH.exists():
+            ACTIVE_KEY_PATH.unlink()
+
+        if had_cert and cert_backup.exists():
+            shutil.copy2(cert_backup, ACTIVE_CERT_PATH)
+        elif not had_cert and ACTIVE_CERT_PATH.exists():
+            ACTIVE_CERT_PATH.unlink()
+
+        raise
+
+    print(f"Active certificate: {ACTIVE_CERT_PATH}")
+    print(f"Active private key: {ACTIVE_KEY_PATH}")
+
+
+def main() -> None:
+    lan_ip = detect_lan_ipv4()
+    generate_certificate(lan_ip)
+    promote_certificate(lan_ip)
+
+
+def main() -> None:
+    lan_ip = detect_lan_ipv4()
+    generate_certificate(lan_ip)
+    promote_certificate()
+
+
+if __name__ == "__main__":
+    main()

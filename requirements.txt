@@ -1,0 +1,4 @@
+mcp==2.2.0
+mcp-types==2.2.0
+PyJWT==2.14.0
+cryptography==50.0.1

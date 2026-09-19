@@ -1,0 +1,32 @@
+from mcp.server import MCPServer
+from core.security import ensure_non_root
+
+from tools import (
+    kali_info,
+    system_status,
+    disk_status,
+    memory_status,
+    network_status,
+    network_interfaces,
+    read_text_file,
+)
+
+mcp = MCPServer("KaliServer")
+ensure_non_root()
+
+
+mcp.tool()(kali_info)
+mcp.tool()(system_status)
+mcp.tool()(disk_status)
+mcp.tool()(memory_status)
+mcp.tool()(network_status)
+mcp.tool()(network_interfaces)
+mcp.tool()(read_text_file)
+
+
+if __name__ == "__main__":
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",
+        port=8000,
+    )
