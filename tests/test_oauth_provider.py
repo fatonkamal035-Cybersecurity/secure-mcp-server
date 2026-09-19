@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from mcp.server.auth.provider import RegistrationError
+from mcp.server.auth.provider import AuthorizeError, RegistrationError
 from mcp.shared.auth import OAuthClientInformationFull
 
 from core.oauth_provider import SQLiteOAuthProvider
@@ -366,6 +366,212 @@ def test_authorize_creates_pending_request(tmp_path):
     assert row[3] == "test-code-challenge"
     assert row[4] == "http://127.0.0.1:8765/callback"
     assert row[5] is None
+
+def test_authorize_rejects_wrong_resource(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-wrong-resource",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Wrong Resource Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+
+        params = AuthorizationParams(
+            state="wrong-resource-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource="https://wrong.example/mcp",
+        )
+
+        with pytest.raises(AuthorizeError) as exc_info:
+            await provider.authorize(client, params)
+
+        assert exc_info.value.error == "invalid_target"
+        assert exc_info.value.error_description == "Unsupported resource"
+
+    asyncio.run(run_test())
+
+
+def test_authorize_rejects_unsupported_scope(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-wrong-scope",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Wrong Scope Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+
+        params = AuthorizationParams(
+            state="wrong-scope-state",
+            scopes=["mcp:read", "admin"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        with pytest.raises(AuthorizeError) as exc_info:
+            await provider.authorize(client, params)
+
+        assert exc_info.value.error == "invalid_scope"
+        assert (
+            exc_info.value.error_description
+            == "Only the 'mcp:read' scope is supported"
+        )
+
+    asyncio.run(run_test())
+
+
+def test_complete_authorization_request_is_single_use(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-authorization-request-reuse",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Authorization Request Reuse Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="reuse-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(client, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        first_redirect = await provider.complete_authorization(
+            request_id,
+            approved=False,
+        )
+
+        query = parse_qs(urlparse(first_redirect).query)
+        assert query["error"][0] == "access_denied"
+        assert query["state"][0] == "reuse-state"
+
+        with pytest.raises(
+            ValueError,
+            match="authorization request is invalid or expired",
+        ):
+            await provider.complete_authorization(
+                request_id,
+                approved=True,
+            )
+
+    asyncio.run(run_test())
+
+
+def test_complete_authorization_rejects_expired_request(tmp_path):
+    db_path = make_test_db(tmp_path)
+    provider = SQLiteOAuthProvider(db_path=db_path)
+
+    client = OAuthClientInformationFull(
+        client_id="test-expired-authorization-request",
+        client_secret=None,
+        client_id_issued_at=0,
+        client_secret_expires_at=None,
+        client_name="Expired Authorization Request Test",
+        redirect_uris=["http://127.0.0.1:8765/callback"],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+        scope="mcp:read",
+        token_endpoint_auth_method="none",
+        application_type="native",
+    )
+
+    async def run_test():
+        await provider.register_client(client)
+
+        from mcp.server.auth.provider import AuthorizationParams
+        import sqlite3
+        from urllib.parse import parse_qs, urlparse
+
+        params = AuthorizationParams(
+            state="expired-state",
+            scopes=["mcp:read"],
+            code_challenge="test-code-challenge",
+            redirect_uri="http://127.0.0.1:8765/callback",
+            redirect_uri_provided_explicitly=True,
+            resource=MCP_RESOURCE,
+        )
+
+        consent_url = await provider.authorize(client, params)
+        request_id = parse_qs(
+            urlparse(consent_url).query
+        )["request_id"][0]
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                UPDATE authorization_requests
+                SET expires_at = 0
+                WHERE request_id = ?
+                """,
+                (request_id,),
+            )
+            conn.commit()
+
+        with pytest.raises(
+            ValueError,
+            match="authorization request is invalid or expired",
+        ):
+            await provider.complete_authorization(
+                request_id,
+                approved=True,
+            )
+
+    asyncio.run(run_test())
+
 
 def test_authorization_code_is_single_use(tmp_path):
     import asyncio
