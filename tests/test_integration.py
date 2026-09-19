@@ -148,6 +148,23 @@ async def integration_flow():
             assert callback_query["state"][0] == state
             code = callback_query["code"][0]
 
+            # PKCE dengan verifier yang salah harus ditolak
+            response = await client.post(
+                f"{BASE_URL}/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": client_id,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "code_verifier": secrets.token_urlsafe(32),
+                    "resource": f"{BASE_URL}/mcp",
+                },
+            )
+            assert response.status_code == 400
+            error_data = response.json()
+            assert error_data["error"] == "invalid_grant"
+            assert error_data["error_description"] == "incorrect code_verifier"
+
             # Token exchange
             response = await client.post(
                 f"{BASE_URL}/token",
