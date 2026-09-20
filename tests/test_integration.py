@@ -85,6 +85,15 @@ async def integration_flow():
             discovery = response.json()
             assert discovery["issuer"] == BASE_URL
             assert discovery["token_endpoint"] == f"{BASE_URL}/token"
+            assert discovery["authorization_endpoint"] == f"{BASE_URL}/authorize"
+            assert discovery["registration_endpoint"] == f"{BASE_URL}/register"
+            assert discovery["scopes_supported"] == ["mcp:read"]
+            assert discovery["response_types_supported"] == ["code"]
+            assert discovery["grant_types_supported"] == ["authorization_code", "refresh_token"]
+            assert set(discovery["token_endpoint_auth_methods_supported"]) == {"client_secret_post", "client_secret_basic"}
+            assert discovery["revocation_endpoint"] == f"{BASE_URL}/revoke"
+            assert set(discovery["revocation_endpoint_auth_methods_supported"]) == {"client_secret_post", "client_secret_basic"}
+            assert discovery["code_challenge_methods_supported"] == ["S256"]
 
             # Protected Resource Metadata
             response = await client.get(
