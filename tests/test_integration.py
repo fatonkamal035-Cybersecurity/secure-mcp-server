@@ -294,6 +294,31 @@ async def integration_flow():
             call_result = sse_json(response)["result"]
             assert call_result["isError"] is False
             assert call_result["structuredContent"]["result"] == "Kali MCP Server aktif."
+
+            # OAuth token revocation
+            response = await client.post(
+                f"{BASE_URL}/revoke",
+                data={
+                    "token": access_token,
+                    "token_type_hint": "access_token",
+                    "client_id": client_id,
+                    "client_secret": "",
+                },
+            )
+            assert response.status_code == 200
+
+            # Revoked access token must no longer access MCP
+            response = await client.post(
+                f"{BASE_URL}/mcp",
+                headers=session_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/list",
+                    "params": {},
+                },
+            )
+            assert response.status_code == 401
     finally:
         if client_id is not None:
             cleanup_oauth_data(client_id)
