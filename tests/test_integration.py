@@ -162,6 +162,10 @@ async def integration_flow():
             response = await client.get(consent_url)
             assert response.status_code == 200
             assert "mcp:read" in response.text
+            assert "MCP Authorization Request" in response.text
+            assert f"Request ID: {consent_query["request_id"][0]}" in response.text
+            assert "approved=true" in response.text
+            assert "approved=false" in response.text
 
             # Approve consent
             response = await client.get(
