@@ -415,6 +415,9 @@ async def integration_flow():
                 },
             )
             assert response.status_code == 200
+            assert response.text == ""
+            assert response.headers["cache-control"] == "no-store"
+            assert response.headers["pragma"] == "no-cache"
 
             # Revoked access token must no longer access MCP
             response = await client.post(
