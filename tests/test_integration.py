@@ -223,6 +223,23 @@ async def integration_flow():
             assert token_data["scope"] == "mcp:read"
             assert token_data["refresh_token"]
 
+            # Authorization code hanya boleh digunakan sekali
+            response = await client.post(
+                f"{BASE_URL}/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": client_id,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "code_verifier": verifier,
+                    "resource": f"{BASE_URL}/mcp",
+                },
+            )
+            assert response.status_code == 400
+            replay_error = response.json()
+            assert replay_error["error"] == "invalid_grant"
+            assert replay_error["error_description"] == "authorization code does not exist"
+
             # /mcp tanpa token harus ditolak
             response = await client.post(
                 f"{BASE_URL}/mcp",
