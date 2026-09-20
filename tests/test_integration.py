@@ -102,6 +102,9 @@ async def integration_flow():
             assert response.status_code == 200
             metadata = response.json()
             assert metadata["resource"] == f"{BASE_URL}/mcp"
+            assert metadata["authorization_servers"] == [BASE_URL]
+            assert metadata["scopes_supported"] == ["mcp:read"]
+            assert metadata["bearer_methods_supported"] == ["header"]
 
             # Dynamic Client Registration
             response = await client.post(
