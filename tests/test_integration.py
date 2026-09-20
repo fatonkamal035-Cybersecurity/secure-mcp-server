@@ -149,6 +149,14 @@ async def integration_flow():
             )
             assert response.status_code == 302
             consent_url = response.headers["location"]
+            consent_location = urlparse(consent_url)
+            assert consent_location.scheme == "https"
+            assert consent_location.netloc == urlparse(BASE_URL).netloc
+            assert consent_location.path == "/oauth/consent"
+            consent_query = parse_qs(consent_location.query)
+            assert set(consent_query) == {"request_id"}
+            assert len(consent_query["request_id"]) == 1
+            assert consent_query["request_id"][0]
 
             # Consent page
             response = await client.get(consent_url)
