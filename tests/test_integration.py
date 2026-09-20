@@ -276,6 +276,10 @@ async def integration_flow():
                 "read_text_file",
             }
 
+            # Snapshot audit log before authenticated tools/call
+            audit_log_path = Path("logs/audit.log")
+            audit_log_offset = audit_log_path.stat().st_size
+
             # tools/call
             response = await client.post(
                 f"{BASE_URL}/mcp",
@@ -294,6 +298,14 @@ async def integration_flow():
             call_result = sse_json(response)["result"]
             assert call_result["isError"] is False
             assert call_result["structuredContent"]["result"] == "Kali MCP Server aktif."
+
+            # Auth credentials must not appear in newly written audit log entries
+            with audit_log_path.open("rb") as audit_log:
+                audit_log.seek(audit_log_offset)
+                new_audit_log = audit_log.read().decode("utf-8", errors="replace")
+
+            assert access_token not in new_audit_log
+            assert f"Bearer {access_token}" not in new_audit_log
 
             # OAuth token revocation
             response = await client.post(
