@@ -222,6 +222,48 @@ async def integration_flow():
             assert token_data["token_type"] == "Bearer"
             assert token_data["scope"] == "mcp:read"
             assert token_data["refresh_token"]
+            refresh_token = token_data["refresh_token"]
+
+            # Refresh token rotation
+            response = await client.post(
+                f"{BASE_URL}/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "refresh_token": refresh_token,
+                    "resource": f"{BASE_URL}/mcp",
+                },
+            )
+            assert response.status_code == 200
+            rotated_token_data = response.json()
+            assert rotated_token_data["token_type"] == "Bearer"
+            assert rotated_token_data["scope"] == "mcp:read"
+            assert isinstance(rotated_token_data["access_token"], str)
+            assert rotated_token_data["access_token"]
+            assert isinstance(rotated_token_data["expires_in"], int)
+            assert rotated_token_data["expires_in"] > 0
+            assert isinstance(rotated_token_data["refresh_token"], str)
+            assert rotated_token_data["refresh_token"]
+            assert rotated_token_data["access_token"] != access_token
+            assert rotated_token_data["refresh_token"] != refresh_token
+
+            # Refresh token lama tidak boleh digunakan kembali
+            response = await client.post(
+                f"{BASE_URL}/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "refresh_token": refresh_token,
+                    "resource": f"{BASE_URL}/mcp",
+                },
+            )
+            assert response.status_code == 400
+            old_refresh_error = response.json()
+            assert old_refresh_error["error"] == "invalid_grant"
+            assert old_refresh_error["error_description"] == "refresh token does not exist"
+
+            access_token = rotated_token_data["access_token"]
+            refresh_token = rotated_token_data["refresh_token"]
 
             # Authorization code hanya boleh digunakan sekali
             response = await client.post(
