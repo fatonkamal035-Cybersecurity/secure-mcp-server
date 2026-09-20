@@ -122,6 +122,16 @@ async def integration_flow():
             assert response.status_code == 201
             registration = response.json()
             client_id = registration["client_id"]
+            assert registration["client_name"] == "pytest-integration"
+            assert registration["application_type"] == "native"
+            assert registration["token_endpoint_auth_method"] == "none"
+            assert registration["grant_types"] == ["authorization_code", "refresh_token"]
+            assert registration["response_types"] == ["code"]
+            assert registration["redirect_uris"] == [redirect_uri]
+            assert registration["scope"] == "mcp:read"
+            assert isinstance(registration["client_id"], str)
+            assert registration["client_id"]
+            assert isinstance(registration["client_id_issued_at"], int)
 
             # Authorization
             response = await client.get(
