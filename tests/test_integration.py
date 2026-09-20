@@ -266,7 +266,7 @@ async def integration_flow():
             tools_result = sse_json(response)["result"]["tools"]
             tool_names = {tool["name"] for tool in tools_result}
 
-            assert {
+            assert tool_names == {
                 "kali_info",
                 "system_status",
                 "disk_status",
@@ -274,7 +274,7 @@ async def integration_flow():
                 "network_status",
                 "network_interfaces",
                 "read_text_file",
-            } <= tool_names
+            }
 
             # tools/call
             response = await client.post(
