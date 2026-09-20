@@ -214,6 +214,10 @@ async def integration_flow():
             assert response.status_code == 200
             token_data = response.json()
             access_token = token_data["access_token"]
+            assert isinstance(token_data["access_token"], str)
+            assert token_data["access_token"]
+            assert isinstance(token_data["expires_in"], int)
+            assert token_data["expires_in"] > 0
 
             assert token_data["token_type"] == "Bearer"
             assert token_data["scope"] == "mcp:read"
