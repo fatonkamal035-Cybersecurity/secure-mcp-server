@@ -419,6 +419,21 @@ async def integration_flow():
             assert response.headers["cache-control"] == "no-store"
             assert response.headers["pragma"] == "no-cache"
 
+            # Refresh token terkait access token yang direvoke harus ikut ditolak
+            response = await client.post(
+                f"{BASE_URL}/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "refresh_token": refresh_token,
+                    "resource": f"{BASE_URL}/mcp",
+                },
+            )
+            assert response.status_code == 400
+            revoked_refresh_error = response.json()
+            assert revoked_refresh_error["error"] == "invalid_grant"
+            assert revoked_refresh_error["error_description"] == "refresh token does not exist"
+
             # Revoked access token must no longer access MCP
             response = await client.post(
                 f"{BASE_URL}/mcp",
