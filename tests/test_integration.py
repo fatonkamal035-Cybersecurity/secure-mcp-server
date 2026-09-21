@@ -64,6 +64,7 @@ def sse_json(response):
 
 async def integration_flow():
     client_id = None
+    client_id_2 = None
     try:
         verifier, challenge = pkce_pair()
         redirect_uri = "http://127.0.0.1:8765/callback"
@@ -404,6 +405,53 @@ async def integration_flow():
             assert access_token not in new_audit_log
             assert f"Bearer {access_token}" not in new_audit_log
 
+            # Client kedua tidak boleh me-revoke token milik client pertama
+            response = await client.post(
+                f"{BASE_URL}/register",
+                json={
+                    "client_name": "pytest-integration-second-client",
+                    "application_type": "native",
+                    "token_endpoint_auth_method": "none",
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "redirect_uris": [redirect_uri],
+                    "scope": "mcp:read",
+                },
+            )
+            assert response.status_code == 201
+            registration_2 = response.json()
+            client_id_2 = registration_2["client_id"]
+            assert isinstance(client_id_2, str)
+            assert client_id_2
+            assert client_id_2 != client_id
+
+            response = await client.post(
+                f"{BASE_URL}/revoke",
+                data={
+                    "token": access_token,
+                    "token_type_hint": "access_token",
+                    "client_id": client_id_2,
+                    "client_secret": "",
+                },
+            )
+            assert response.status_code == 200
+            assert response.text == ""
+            assert response.headers["cache-control"] == "no-store"
+            assert response.headers["pragma"] == "no-cache"
+
+            # Token client pertama harus tetap valid
+            response = await client.post(
+                f"{BASE_URL}/mcp",
+                headers=session_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/list",
+                    "params": {},
+                },
+            )
+            assert response.status_code == 200
+
             # OAuth token revocation
             response = await client.post(
                 f"{BASE_URL}/revoke",
@@ -462,6 +510,8 @@ async def integration_flow():
             )
             assert response.status_code == 401
     finally:
+        if client_id_2 is not None:
+            cleanup_oauth_data(client_id_2)
         if client_id is not None:
             cleanup_oauth_data(client_id)
 
