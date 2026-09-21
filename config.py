@@ -71,3 +71,11 @@ TLS_KEY_PATH = Path(
         str(BASE_DIR / "secrets" / "tls" / "mcp-server.key"),
     )
 )
+
+OAUTH_RATE_LIMIT = int(
+    os.getenv("OAUTH_RATE_LIMIT", "10")
+)
+
+OAUTH_RATE_LIMIT_WINDOW_SECONDS = float(
+    os.getenv("OAUTH_RATE_LIMIT_WINDOW_SECONDS", "60")
+)

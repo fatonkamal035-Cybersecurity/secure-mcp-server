@@ -9,7 +9,17 @@ from core.security import ensure_non_root
 from core.audit_extension import AuditExtension
 from core.oauth_provider import SQLiteOAuthProvider
 from core.oauth_routes import create_oauth_consent_route
-from config import MCP_HOST, MCP_PORT, MCP_ISSUER, MCP_RESOURCE, TLS_CERT_PATH, TLS_KEY_PATH
+from core.rate_limit import RateLimitMiddleware
+from config import (
+    MCP_HOST,
+    MCP_PORT,
+    MCP_ISSUER,
+    MCP_RESOURCE,
+    TLS_CERT_PATH,
+    TLS_KEY_PATH,
+    OAUTH_RATE_LIMIT,
+    OAUTH_RATE_LIMIT_WINDOW_SECONDS,
+)
 
 import logging
 import uvicorn
@@ -77,6 +87,13 @@ mcp.custom_route(
 
 if __name__ == "__main__":
     app = mcp.streamable_http_app(host=MCP_HOST)
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        paths={"/register", "/authorize", "/token", "/revoke"},
+        limit=OAUTH_RATE_LIMIT,
+        window_seconds=OAUTH_RATE_LIMIT_WINDOW_SECONDS,
+    )
 
     uvicorn.run(
         app,
