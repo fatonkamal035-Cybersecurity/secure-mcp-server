@@ -162,3 +162,20 @@ def test_rate_limit_ignores_non_target_paths_and_options():
         assert second_status == 429
 
     asyncio.run(run())
+
+
+def test_rate_limit_allows_mcp_after_11_requests():
+    middleware = RateLimitMiddleware(
+        noop_app,
+        paths={"/register", "/authorize", "/token", "/revoke"},
+        limit=10,
+        window_seconds=60,
+    )
+    scope = make_scope("/mcp")
+
+    async def run():
+        for _ in range(11):
+            status, _, _ = await call_middleware(middleware, scope)
+            assert status != 429
+
+    asyncio.run(run())
