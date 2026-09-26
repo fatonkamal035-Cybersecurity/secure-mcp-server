@@ -1,3 +1,6 @@
+import asyncio
+
+from server import mcp
 from tools import (
     kali_info,
     system_status,
@@ -6,6 +9,17 @@ from tools import (
     network_status,
     network_interfaces,
 )
+
+
+EXPECTED_TOOL_NAMES = {
+    "kali_info",
+    "system_status",
+    "disk_status",
+    "memory_status",
+    "network_status",
+    "network_interfaces",
+    "read_text_file",
+}
 
 
 def test_kali_info():
@@ -41,6 +55,7 @@ def test_disk_status_uses_disk_usage_result(monkeypatch):
     assert "Disk terpakai: 4.0 GB" in result
     assert "Disk bebas: 6.0 GB" in result
 
+
 def test_memory_status():
     result = memory_status()
     assert "RAM total:" in result
@@ -68,6 +83,7 @@ def test_memory_status_parses_meminfo(monkeypatch):
     assert "RAM terpakai: 0.5 GB" in result
     assert "RAM tersedia: 1.5 GB" in result
 
+
 def test_network_status():
     result = network_status()
     assert "Hostname:" in result
@@ -94,6 +110,7 @@ def test_network_status_handles_resolution_error(monkeypatch):
     result = system_tools.network_status()
 
     assert result == "Hostname: test-host\nIP lokal: Tidak tersedia"
+
 
 def test_network_interfaces_uses_fixed_command(monkeypatch):
     from tools import network_tools
@@ -133,3 +150,10 @@ def test_network_interfaces():
         assert interface
         assert address
         assert "/" in address
+
+
+def test_mcp_registers_only_allowlisted_tools():
+    tools = asyncio.run(mcp.list_tools())
+    actual_tool_names = {tool.name for tool in tools}
+
+    assert actual_tool_names == EXPECTED_TOOL_NAMES
