@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from mcp.server.context import ServerRequestContext
 from mcp.server.extension import Extension
 
+from core.audit_sanitizer import sanitize_arguments
+
 
 logger = logging.getLogger("mcp.audit")
 
@@ -23,7 +25,7 @@ class AuditExtension(Extension):
             "tool_call time=%s tool=%s arguments=%r",
             timestamp,
             params.name,
-            params.arguments,
+            sanitize_arguments(params.arguments or {}),
         )
 
         try:

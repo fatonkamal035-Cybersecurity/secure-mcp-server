@@ -40,6 +40,35 @@ def test_audit_extension_success(caplog):
     )
 
 
+
+def test_audit_extension_logs_arguments(caplog):
+    async def run():
+        async def call_next(ctx):
+            return "ok"
+
+        params = SimpleNamespace(
+            name="read_text_file",
+            arguments={"filename": "README.md"},
+        )
+
+        return await AuditExtension().intercept_tool_call(
+            params,
+            SimpleNamespace(),
+            call_next,
+        )
+
+    with caplog.at_level(logging.INFO, logger="mcp.audit"):
+        result = asyncio.run(run())
+
+    assert result == "ok"
+    assert any(
+        "tool_call" in record.message
+        and "tool=read_text_file" in record.message
+        and "README.md" in record.message
+        for record in caplog.records
+    )
+
+
 def test_audit_extension_error(caplog):
     async def run():
         async def call_next(ctx):
