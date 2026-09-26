@@ -95,6 +95,33 @@ def test_network_status_handles_resolution_error(monkeypatch):
 
     assert result == "Hostname: test-host\nIP lokal: Tidak tersedia"
 
+def test_network_interfaces_uses_fixed_command(monkeypatch):
+    from tools import network_tools
+
+    captured = {}
+
+    class FakeResult:
+        stdout = "1: lo    inet 127.0.0.1/8 scope host lo"
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return FakeResult()
+
+    monkeypatch.setattr(network_tools.subprocess, "run", fake_run)
+
+    result = network_tools.network_interfaces()
+
+    assert result == "lo: 127.0.0.1/8"
+    assert captured["command"] == ["ip", "-4", "-o", "addr", "show"]
+    assert captured["kwargs"] == {
+        "capture_output": True,
+        "text": True,
+        "check": True,
+        "timeout": 5,
+    }
+
+
 def test_network_interfaces():
     result = network_interfaces()
 
