@@ -27,6 +27,20 @@ def test_disk_status():
     assert "Disk bebas:" in result
 
 
+def test_disk_status_uses_disk_usage_result(monkeypatch):
+    from tools import system_tools
+
+    monkeypatch.setattr(
+        "shutil.disk_usage",
+        lambda path: (10 * 1024**3, 4 * 1024**3, 6 * 1024**3),
+    )
+
+    result = system_tools.disk_status()
+
+    assert "Disk total: 10.0 GB" in result
+    assert "Disk terpakai: 4.0 GB" in result
+    assert "Disk bebas: 6.0 GB" in result
+
 def test_memory_status():
     result = memory_status()
     assert "RAM total:" in result
@@ -34,13 +48,61 @@ def test_memory_status():
     assert "RAM tersedia:" in result
 
 
+def test_memory_status_parses_meminfo(monkeypatch):
+    from tools import system_tools
+
+    meminfo = (
+        "MemTotal:       2097152 kB\n"
+        "MemAvailable:   1572864 kB\n"
+    )
+
+    def fake_open(*args, **kwargs):
+        from io import StringIO
+        return StringIO(meminfo)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+
+    result = system_tools.memory_status()
+
+    assert "RAM total: 2.0 GB" in result
+    assert "RAM terpakai: 0.5 GB" in result
+    assert "RAM tersedia: 1.5 GB" in result
+
 def test_network_status():
     result = network_status()
     assert "Hostname:" in result
     assert "IP lokal:" in result
 
 
+def test_network_status_handles_resolution_error(monkeypatch):
+    from tools import system_tools
+
+    monkeypatch.setattr(
+        "socket.gethostname",
+        lambda: "test-host",
+    )
+
+    def raise_resolution_error(hostname):
+        import socket
+        raise socket.gaierror("resolution failed")
+
+    monkeypatch.setattr(
+        "socket.gethostbyname",
+        raise_resolution_error,
+    )
+
+    result = system_tools.network_status()
+
+    assert result == "Hostname: test-host\nIP lokal: Tidak tersedia"
+
 def test_network_interfaces():
     result = network_interfaces()
-    assert "wlan0:" in result
-    assert "192.168.1.7/24" in result
+
+    assert isinstance(result, str)
+    assert result.strip()
+
+    for line in result.splitlines():
+        interface, address = line.split(": ", 1)
+        assert interface
+        assert address
+        assert "/" in address

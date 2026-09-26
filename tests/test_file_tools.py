@@ -18,6 +18,24 @@ def test_reject_absolute_path():
         read_text_file("/etc/passwd")
 
 
+def test_reject_symlink_outside_base_dir(tmp_path, monkeypatch):
+    from tools import file_tools
+
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("SECRET-TEST", encoding="utf-8")
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+
+    symlink = base_dir / "link.txt"
+    symlink.symlink_to(outside_file)
+
+    monkeypatch.setattr(file_tools, "BASE_DIR", base_dir)
+
+    with pytest.raises(ValueError, match="akses file di luar project tidak diizinkan"):
+        file_tools.read_text_file("link.txt")
+
+
 def test_missing_file():
     with pytest.raises(FileNotFoundError):
         read_text_file("tests/file-that-does-not-exist.txt")
